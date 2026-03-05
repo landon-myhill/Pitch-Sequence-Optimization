@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pitch Sequence Optimizer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Pitch Sequence Optimizer</h1>
+        <p class="subtitle">Nathan Eovaldi &mdash; RE24 Pitch Recommendations</p>
+    </header>
+
+    <main>
+        <!-- ── LEFT: Game State Controls ────────────────────────────── -->
+        <section class="panel" id="game-state">
+            <h2>Game State</h2>
+
+            <div class="control-group">
+                <label>Count</label>
+                <div class="count-controls">
+                    <select id="balls" onchange="fetchRecommendations()">
+                        {% for b in range(4) %}
+                        <option value="{{ b }}" {{ 'selected' if state.balls == b }}>{{ b }}</option>
+                        {% endfor %}
+                    </select>
+                    <span class="dash">&ndash;</span>
+                    <select id="strikes" onchange="fetchRecommendations()">
+                        {% for s in range(3) %}
+                        <option value="{{ s }}" {{ 'selected' if state.strikes == s }}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Outs</label>
+                <select id="outs" onchange="fetchRecommendations()">
+                    {% for o in range(3) %}
+                    <option value="{{ o }}" {{ 'selected' if state.outs == o }}>{{ o }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Inning</label>
+                <select id="inning" onchange="fetchRecommendations()">
+                    {% for i in range(1, 10) %}
+                    <option value="{{ i }}" {{ 'selected' if state.inning == i }}>{{ i }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Batter</label>
+                <div class="toggle-group">
+                    <button class="toggle {{ 'active' if state.stand == 'R' }}" onclick="setBatter('R')">RHB</button>
+                    <button class="toggle {{ 'active' if state.stand == 'L' }}" onclick="setBatter('L')">LHB</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Runners</label>
+                <div class="runner-checks">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="on_1b" {{ 'checked' if state.on_1b }} onchange="fetchRecommendations()">
+                        1B
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="on_2b" {{ 'checked' if state.on_2b }} onchange="fetchRecommendations()">
+                        2B
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="on_3b" {{ 'checked' if state.on_3b }} onchange="fetchRecommendations()">
+                        3B
+                    </label>
+                </div>
+            </div>
+
+            <div class="state-info">
+                <span>Prev: <strong id="prev-pitch">{{ state.prev_pitch_type }}</strong></span>
+                <span>TTO: <strong id="tto">{{ state.times_through_order }}</strong></span>
+            </div>
+        </section>
+
+        <!-- ── RIGHT: Recommendations ───────────────────────────────── -->
+        <section class="panel" id="recommendations">
+            <h2>Top 10 Recommendations</h2>
+
+            <table id="recs-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Pitch + Zone</th>
+                        <th>RE24</th>
+                        <th>P(K)</th>
+                        <th>P(Out)</th>
+                        <th>P(Hit)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rec in recs %}
+                    <tr class="{{ 'top-pick' if loop.index == 1 }}">
+                        <td>{{ loop.index }}</td>
+                        <td>{{ rec.combo }}</td>
+                        <td>{{ "%.4f"|format(rec.re24_score) }}</td>
+                        <td>{{ "%.3f"|format(rec.strike) }}</td>
+                        <td>{{ "%.3f"|format(rec.out) }}</td>
+                        <td>{{ "%.3f"|format(rec.hit) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <div id="chart-container">
+                {% if chart %}
+                <img id="chart-img" src="data:image/png;base64,{{ chart }}" alt="Recommendations chart">
+                {% endif %}
+            </div>
+        </section>
+    </main>
+
+    <!-- ── BOTTOM: Simulate + History ───────────────────────────────── -->
+    <section class="panel full-width" id="simulate-section">
+        <h2>Simulate a Pitch</h2>
+        <div class="simulate-controls">
+            <div class="sim-field">
+                <label>Pitch Type</label>
+                <select id="sim-pitch">
+                    {% for pt in pitch_types %}
+                    <option value="{{ pt }}">{{ pt }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="sim-field">
+                <label>Zone</label>
+                <select id="sim-zone">
+                    {% for z in zones %}
+                    <option value="{{ z }}">{{ z }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="sim-field">
+                <label>Outcome</label>
+                <div class="outcome-buttons">
+                    <button class="outcome-btn strike" onclick="simulatePitch('strike')">Strike</button>
+                    <button class="outcome-btn ball" onclick="simulatePitch('ball')">Ball</button>
+                    <button class="outcome-btn out" onclick="simulatePitch('out')">Out</button>
+                    <button class="outcome-btn hit" onclick="simulatePitch('hit')">Hit</button>
+                    <button class="outcome-btn walk" onclick="simulatePitch('walk_hbp')">Walk</button>
+                </div>
+            </div>
+
+            <button class="reset-btn" onclick="resetState()">Reset AB</button>
+        </div>
+    </section>
+
+    <section class="panel full-width" id="history-section">
+        <h2>Pitch History</h2>
+        <div id="history-list">
+            <p class="empty-history">No pitches thrown yet.</p>
+        </div>
+    </section>
+
+    <script>
+        let pitchCount = 0;
+
+        function getState() {
+            return {
+                balls: parseInt(document.getElementById('balls').value),
+                strikes: parseInt(document.getElementById('strikes').value),
+                outs: parseInt(document.getElementById('outs').value),
+                inning: parseInt(document.getElementById('inning').value),
+                stand: document.querySelector('.toggle.active')?.dataset?.stand || 'R',
+                on_1b: document.getElementById('on_1b').checked,
+                on_2b: document.getElementById('on_2b').checked,
+                on_3b: document.getElementById('on_3b').checked,
+            };
+        }
+
+        function setBatter(hand) {
+            document.querySelectorAll('.toggle').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            event.target.dataset.stand = hand;
+            fetchRecommendations();
+        }
+
+        // Set data-stand attributes on load
+        document.querySelectorAll('.toggle').forEach(btn => {
+            btn.dataset.stand = btn.textContent === 'RHB' ? 'R' : 'L';
+        });
+
+        async function fetchRecommendations() {
+            const state = getState();
+            const resp = await fetch('/recommend', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(state),
+            });
+            const data = await resp.json();
+            updateUI(data);
+        }
+
+        async function simulatePitch(outcome) {
+            const pitchType = document.getElementById('sim-pitch').value;
+            const zone = document.getElementById('sim-zone').value;
+
+            const resp = await fetch('/simulate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({pitch_type: pitchType, zone_label: zone, outcome: outcome}),
+            });
+            const data = await resp.json();
+
+            // Add to history
+            pitchCount++;
+            const entry = data.history_entry;
+            addHistoryEntry(pitchCount, entry);
+
+            // Update controls to match new state
+            syncControls(data.state);
+            updateUI(data);
+        }
+
+        async function resetState() {
+            const stand = document.querySelector('.toggle.active')?.dataset?.stand || 'R';
+            const resp = await fetch('/reset', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({stand: stand}),
+            });
+            const data = await resp.json();
+
+            pitchCount = 0;
+            document.getElementById('history-list').innerHTML =
+                '<p class="empty-history">No pitches thrown yet.</p>';
+
+            syncControls(data.state);
+            updateUI(data);
+        }
+
+        function updateUI(data) {
+            // Update recommendations table
+            const tbody = document.querySelector('#recs-table tbody');
+            tbody.innerHTML = '';
+            data.recs.forEach((rec, i) => {
+                const tr = document.createElement('tr');
+                if (i === 0) tr.className = 'top-pick';
+                tr.innerHTML = `
+                    <td>${i + 1}</td>
+                    <td>${rec.combo}</td>
+                    <td>${rec.re24_score.toFixed(4)}</td>
+                    <td>${rec.strike.toFixed(3)}</td>
+                    <td>${rec.out.toFixed(3)}</td>
+                    <td>${rec.hit.toFixed(3)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // Update chart
+            if (data.chart) {
+                document.getElementById('chart-img').src = 'data:image/png;base64,' + data.chart;
+            }
+
+            // Update state info
+            if (data.state) {
+                document.getElementById('prev-pitch').textContent = data.state.prev_pitch_type || 'none';
+                document.getElementById('tto').textContent = data.state.times_through_order || 1;
+            }
+        }
+
+        function syncControls(state) {
+            document.getElementById('balls').value = state.balls;
+            document.getElementById('strikes').value = state.strikes;
+            document.getElementById('outs').value = state.outs;
+            document.getElementById('inning').value = state.inning;
+            document.getElementById('on_1b').checked = state.on_1b;
+            document.getElementById('on_2b').checked = state.on_2b;
+            document.getElementById('on_3b').checked = state.on_3b;
+
+            // Sync batter toggle
+            document.querySelectorAll('.toggle').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.stand === state.stand);
+            });
+        }
+
+        function addHistoryEntry(num, entry) {
+            const list = document.getElementById('history-list');
+            // Remove empty message
+            const empty = list.querySelector('.empty-history');
+            if (empty) empty.remove();
+
+            const div = document.createElement('div');
+            div.className = 'history-entry';
+            div.innerHTML = `
+                <span class="history-num">#${num}</span>
+                <span class="history-pitch">${entry.pitch_type}</span>
+                <span class="history-at">@</span>
+                <span class="history-zone">${entry.zone_label}</span>
+                <span class="history-arrow">&rarr;</span>
+                <span class="history-outcome outcome-${entry.outcome}">${entry.outcome}</span>
+                <span class="history-count">(${entry.count_before} &rarr; ${entry.count_after})</span>
+            `;
+            list.prepend(div);
+        }
+    </script>
+</body>
+</html>
