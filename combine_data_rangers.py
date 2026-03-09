@@ -20,11 +20,12 @@ def main():
         ignore_index=True,
     )
 
-    # ── Filter to Texas Rangers games ─────────────────────────────────────
-    pitch_data = pitch_data[
-        (pitch_data["home_team"] == "TEX") | (pitch_data["away_team"] == "TEX")
-    ].copy()
-    print(f"Rangers rows: {len(pitch_data)}")
+    # Deduplicate — games appear under both home and away team folders
+    if "game_pk" in pitch_data.columns and "pitch_number" in pitch_data.columns:
+        pitch_data = pitch_data.drop_duplicates(
+            subset=["game_pk", "at_bat_number", "pitch_number"], keep="first"
+        )
+    print(f"Total rows (deduplicated): {len(pitch_data)}")
 
     # ── Drop unwanted columns ─────────────────────────────────────────────
     # Kept: pfx_x, pfx_z, release_speed, release_spin_rate, stand, p_throws
@@ -59,11 +60,25 @@ def main():
             pitch_data.drop(columns=[base], inplace=True)
 
     # ── NA handling: categoricals ─────────────────────────────────────────
-    _fill_na_str(pitch_data, "events",     "NonTerminalPitch")
+    _fill_na_str(pitch_data, "events",      "NonTerminalPitch")
+    _fill_na_str(pitch_data, "description", "unknown")
     _fill_na_str(pitch_data, "hit_location", "NonTerminalLocation")
-    _fill_na_str(pitch_data, "bb_type",    "NoBB")
+    _fill_na_str(pitch_data, "bb_type",     "NoBB")
     _fill_na_str(pitch_data, "pitcher_days_since_prev_game", "NoPriorGame")
     _fill_na_str(pitch_data, "batter_days_since_prev_game",  "NoPriorGame")
+
+    # Batter names: normalize to lowercase, fill missing
+    if "batter_name" in pitch_data.columns:
+        pitch_data["batter_name"] = (
+            pitch_data["batter_name"].fillna("unknown").str.lower().str.strip()
+        )
+
+    # Derive batter's team from inning_topbot (Top = away batting, Bot = home)
+    if "inning_topbot" in pitch_data.columns:
+        pitch_data["batter_team"] = pitch_data.apply(
+            lambda r: r["away_team"] if r.get("inning_topbot") == "Top" else r["home_team"],
+            axis=1,
+        )
 
     # Ball-in-play metrics: not-applicable when no BIP
     for col in ("hit_distance_sc", "launch_speed", "launch_angle"):

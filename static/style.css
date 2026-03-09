@@ -121,37 +121,11 @@ select:hover {
     border-color: var(--accent);
 }
 
-/* ── Toggle buttons (RHB / LHB) ──────────────────────────────────────────── */
+/* ── Batter select ────────────────────────────────────────────────────────── */
 
-.toggle-group {
-    display: flex;
-    gap: 0;
-}
-
-.toggle {
-    padding: 0.4rem 1rem;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 0.85rem;
-    font-family: inherit;
-    transition: all 0.15s;
-}
-
-.toggle:first-child {
-    border-radius: 4px 0 0 4px;
-}
-
-.toggle:last-child {
-    border-radius: 0 4px 4px 0;
-    border-left: none;
-}
-
-.toggle.active {
-    background: var(--accent);
-    color: white;
-    border-color: var(--accent);
+#team-select,
+#batter-select {
+    width: 100%;
 }
 
 /* ── Runner checkboxes ────────────────────────────────────────────────────── */

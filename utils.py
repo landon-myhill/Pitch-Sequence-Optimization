@@ -50,10 +50,27 @@ OUT_EVENTS = {
 WALK_HBP_EVENTS = {"walk", "hit_by_pitch"}
 
 
+WHIFF_DESCRIPTIONS = {
+    "swinging_strike", "swinging_strike_blocked",
+    "missed_bunt", "swinging_pitchout",
+}
+
+FOUL_DESCRIPTIONS = {
+    "foul", "foul_tip", "foul_bunt", "foul_pitchout",
+}
+
+
 def classify_outcome(row):
-    """Classify a pitch into: hit, out, walk_hbp, ball, strike, or NonTerminalPitch."""
+    """
+    Classify a pitch into: hit, out, walk_hbp, ball,
+    called_strike, whiff, foul, or NonTerminalPitch.
+
+    Splitting strikes lets the model learn that corner pitches
+    generate whiffs/called strikes while middle pitches get fouls.
+    """
     event = row.get("events", "")
     pitch_result = row.get("type", "")
+    desc = str(row.get("description", "")).lower().strip()
 
     if event in HIT_EVENTS:
         return "hit"
@@ -64,7 +81,11 @@ def classify_outcome(row):
     if pitch_result == "B":
         return "ball"
     if pitch_result == "S":
-        return "strike"
+        if desc in WHIFF_DESCRIPTIONS:
+            return "whiff"
+        if desc in FOUL_DESCRIPTIONS:
+            return "foul"
+        return "called_strike"
     return "NonTerminalPitch"
 
 
@@ -80,7 +101,7 @@ CATEGORICAL_FEATURES = [
     # baserunners
     "on_1b_occupied", "on_2b_occupied", "on_3b_occupied",
     # matchup
-    "stand", "p_throws",
+    "batter_name", "stand", "p_throws",
     # sequencing (previous pitch in this at-bat)
     "prev_pitch_type", "prev_zone_label",
 ]
@@ -199,14 +220,29 @@ def compute_re24_score(prob_dict, balls, strikes, outs, on_1b, on_2b, on_3b):
         )
         re_ball = re_before + count_delta
 
+    # ── Foul ball RE ──────────────────────────────────────────────────────
+    # Fouls add a strike only when strikes < 2; at 2 strikes they're dead pitches.
+    if strikes >= 2:
+        re_foul = re_before  # count doesn't change
+    else:
+        re_foul = re_strike  # same as adding a strike
+
     # ── Weighted expected RE after this pitch ─────────────────────────────
     p = prob_dict
+    # Sum all strike-type probabilities for backwards compatibility
+    p_called = p.get("called_strike", 0)
+    p_whiff  = p.get("whiff", 0)
+    p_foul   = p.get("foul", 0)
+    # Also accept legacy "strike" key
+    p_strike_legacy = p.get("strike", 0)
+
     expected_re = (
-        p.get("strike", 0)   * re_strike
-        + p.get("ball", 0)     * re_ball
-        + p.get("out", 0)      * re_out
-        + p.get("hit", 0)      * re_hit
-        + p.get("walk_hbp", 0) * re_walk
+        (p_called + p_whiff + p_strike_legacy) * re_strike
+        + p_foul                                 * re_foul
+        + p.get("ball", 0)                       * re_ball
+        + p.get("out", 0)                        * re_out
+        + p.get("hit", 0)                        * re_hit
+        + p.get("walk_hbp", 0)                   * re_walk
     )
 
     # Negative delta = good for pitcher → flip sign so higher = better

@@ -53,11 +53,20 @@
             </div>
 
             <div class="control-group">
+                <label>Team</label>
+                <select id="team-select" onchange="filterBatters()">
+                    <option value="">-- All Teams --</option>
+                    {% for t in teams %}
+                    <option value="{{ t }}">{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="control-group">
                 <label>Batter</label>
-                <div class="toggle-group">
-                    <button class="toggle {{ 'active' if state.stand == 'R' }}" onclick="setBatter('R')">RHB</button>
-                    <button class="toggle {{ 'active' if state.stand == 'L' }}" onclick="setBatter('L')">LHB</button>
-                </div>
+                <select id="batter-select" onchange="fetchRecommendations()">
+                    <option value="unknown">-- Generic --</option>
+                </select>
             </div>
 
             <div class="control-group">
@@ -79,6 +88,7 @@
             </div>
 
             <div class="state-info">
+                <span>Hand: <strong id="stand-display">{{ state.stand }}HB</strong></span>
                 <span>Prev: <strong id="prev-pitch">{{ state.prev_pitch_type }}</strong></span>
                 <span>TTO: <strong id="tto">{{ state.times_through_order }}</strong></span>
             </div>
@@ -94,7 +104,9 @@
                         <th>#</th>
                         <th>Pitch + Zone</th>
                         <th>RE24</th>
-                        <th>P(K)</th>
+                        <th>P(Called)</th>
+                        <th>P(Whiff)</th>
+                        <th>P(Foul)</th>
                         <th>P(Out)</th>
                         <th>P(Hit)</th>
                     </tr>
@@ -105,7 +117,9 @@
                         <td>{{ loop.index }}</td>
                         <td>{{ rec.combo }}</td>
                         <td>{{ "%.4f"|format(rec.re24_score) }}</td>
-                        <td>{{ "%.3f"|format(rec.strike) }}</td>
+                        <td>{{ "%.3f"|format(rec.called_strike) }}</td>
+                        <td>{{ "%.3f"|format(rec.whiff) }}</td>
+                        <td>{{ "%.3f"|format(rec.foul) }}</td>
                         <td>{{ "%.3f"|format(rec.out) }}</td>
                         <td>{{ "%.3f"|format(rec.hit) }}</td>
                     </tr>
@@ -168,30 +182,55 @@
     <script>
         let pitchCount = 0;
 
+        // Batter data from server: {name: {stand, team}, ...}
+        const BATTER_INFO = {{ batter_info | tojson }};
+        const CURRENT_BATTER = {{ state.batter_name | tojson }};
+
+        function filterBatters() {
+            const team = document.getElementById('team-select').value;
+            const select = document.getElementById('batter-select');
+            const currentVal = select.value;
+
+            // Clear all options
+            select.innerHTML = '<option value="unknown">-- Generic --</option>';
+
+            // Build filtered + sorted list
+            const batters = Object.entries(BATTER_INFO)
+                .filter(([name, info]) => !team || info.team === team)
+                .sort((a, b) => a[0].localeCompare(b[0]));
+
+            for (const [name, info] of batters) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                // Title-case the name
+                opt.textContent = name.replace(/\b\w/g, c => c.toUpperCase()) + ` (${info.stand}HB)`;
+                select.appendChild(opt);
+            }
+
+            // Try to keep the current selection
+            if ([...select.options].some(o => o.value === currentVal)) {
+                select.value = currentVal;
+            } else {
+                select.value = 'unknown';
+            }
+        }
+
+        // Initialize batter dropdown on page load
+        filterBatters();
+        document.getElementById('batter-select').value = CURRENT_BATTER;
+
         function getState() {
             return {
                 balls: parseInt(document.getElementById('balls').value),
                 strikes: parseInt(document.getElementById('strikes').value),
                 outs: parseInt(document.getElementById('outs').value),
                 inning: parseInt(document.getElementById('inning').value),
-                stand: document.querySelector('.toggle.active')?.dataset?.stand || 'R',
+                batter_name: document.getElementById('batter-select').value,
                 on_1b: document.getElementById('on_1b').checked,
                 on_2b: document.getElementById('on_2b').checked,
                 on_3b: document.getElementById('on_3b').checked,
             };
         }
-
-        function setBatter(hand) {
-            document.querySelectorAll('.toggle').forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
-            event.target.dataset.stand = hand;
-            fetchRecommendations();
-        }
-
-        // Set data-stand attributes on load
-        document.querySelectorAll('.toggle').forEach(btn => {
-            btn.dataset.stand = btn.textContent === 'RHB' ? 'R' : 'L';
-        });
 
         async function fetchRecommendations() {
             const state = getState();
@@ -226,11 +265,11 @@
         }
 
         async function resetState() {
-            const stand = document.querySelector('.toggle.active')?.dataset?.stand || 'R';
+            const batter = document.getElementById('batter-select').value;
             const resp = await fetch('/reset', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({stand: stand}),
+                body: JSON.stringify({batter_name: batter}),
             });
             const data = await resp.json();
 
@@ -253,7 +292,9 @@
                     <td>${i + 1}</td>
                     <td>${rec.combo}</td>
                     <td>${rec.re24_score.toFixed(4)}</td>
-                    <td>${rec.strike.toFixed(3)}</td>
+                    <td>${rec.called_strike.toFixed(3)}</td>
+                    <td>${rec.whiff.toFixed(3)}</td>
+                    <td>${rec.foul.toFixed(3)}</td>
                     <td>${rec.out.toFixed(3)}</td>
                     <td>${rec.hit.toFixed(3)}</td>
                 `;
@@ -267,6 +308,7 @@
 
             // Update state info
             if (data.state) {
+                document.getElementById('stand-display').textContent = (data.state.stand || 'R') + 'HB';
                 document.getElementById('prev-pitch').textContent = data.state.prev_pitch_type || 'none';
                 document.getElementById('tto').textContent = data.state.times_through_order || 1;
             }
@@ -280,11 +322,7 @@
             document.getElementById('on_1b').checked = state.on_1b;
             document.getElementById('on_2b').checked = state.on_2b;
             document.getElementById('on_3b').checked = state.on_3b;
-
-            // Sync batter toggle
-            document.querySelectorAll('.toggle').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.stand === state.stand);
-            });
+            document.getElementById('batter-select').value = state.batter_name || 'unknown';
         }
 
         function addHistoryEntry(num, entry) {

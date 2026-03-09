@@ -60,26 +60,33 @@ while current_date <= season_end:
         if day_data.empty:
             print(f"No games found on {date_str}.")
         else:
+            # Only keep games involving these teams
+            TARGET_TEAMS = {"TEX", "HOU"}
+
             # Process each game individually (grouped by 'game_pk')
             for game_id, game_data in day_data.groupby('game_pk'):
                 # Extract team information (adjust column names if needed)
                 home_team = game_data['home_team'].iloc[0]
                 away_team = game_data['away_team'].iloc[0]
-                
-                # Add actual player names 
+
+                # Skip games that don't involve a target team
+                if home_team not in TARGET_TEAMS and away_team not in TARGET_TEAMS:
+                    continue
+
+                # Add actual player names
                 if 'batter' in game_data.columns:
                     game_data['batter_name'] = game_data['batter'].apply(get_player_name)
                 if 'pitcher' in game_data.columns:
                     game_data['pitcher_name'] = game_data['pitcher'].apply(get_player_name)
-                
-                # Save the updated game data 
+
+                # Save the updated game data
                 for team in [home_team, away_team]:
                     team_folder = os.path.join(base_folder, team)
                     os.makedirs(team_folder, exist_ok=True)
-                    
+
                     file_name = f"{date_str}_{game_id}.csv"
                     file_path = os.path.join(team_folder, file_name)
-                    
+
                     game_data.to_csv(file_path, index=False)
                     print(f"Saved game {game_id} for team {team} to {file_path}")
     except Exception as e:

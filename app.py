@@ -26,9 +26,13 @@ app = Flask(__name__)
 app.secret_key = "pso-dev-key"
 
 # Load model once at startup
-MODEL, ENCODERS, PITCH_AVGS = load_model()
+MODEL, ENCODERS, PITCH_AVGS, BATTER_INFO = load_model()
 PITCH_TYPES = list(PITCH_AVGS.keys())
 ZONES = ENCODERS["zone_label"].classes_.tolist()
+# Build team → batter list and sorted team list for the UI
+# BATTER_INFO is {name: {"stand": "R", "team": "HOU"}, ...}
+TEAMS = sorted({info["team"] for info in BATTER_INFO.values() if info.get("team")})
+BATTERS = sorted(BATTER_INFO.keys())
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -38,7 +42,7 @@ ZONES = ENCODERS["zone_label"].classes_.tolist()
 def get_state():
     """Get game state from session, or create a fresh one."""
     if "game_state" not in session:
-        session["game_state"] = new_game_state("R")
+        session["game_state"] = new_game_state()
     return session["game_state"]
 
 
@@ -52,7 +56,7 @@ def get_recommendations(state):
     """Get top 10 recommendations and return as list of dicts."""
     recs = recommend_next_pitch(state, MODEL, ENCODERS, PITCH_AVGS, top_n=10)
     return recs[["combo", "pitch_type", "zone_label", "re24_score",
-                 "strike", "out", "hit", "ball"]].to_dict(orient="records")
+                 "called_strike", "whiff", "foul", "out", "hit", "ball"]].to_dict(orient="records")
 
 
 def make_chart(recs_list):
@@ -96,6 +100,9 @@ def index():
         chart=chart,
         pitch_types=PITCH_TYPES,
         zones=ZONES,
+        teams=TEAMS,
+        batters=BATTERS,
+        batter_info=BATTER_INFO,
     )
 
 
@@ -106,14 +113,19 @@ def recommend():
     state = get_state()
 
     # Update state from UI controls
-    state["balls"]   = int(data.get("balls", state["balls"]))
-    state["strikes"] = int(data.get("strikes", state["strikes"]))
-    state["outs"]    = int(data.get("outs", state["outs"]))
-    state["inning"]  = int(data.get("inning", state["inning"]))
-    state["stand"]   = data.get("stand", state["stand"])
-    state["on_1b"]   = data.get("on_1b", state["on_1b"])
-    state["on_2b"]   = data.get("on_2b", state["on_2b"])
-    state["on_3b"]   = data.get("on_3b", state["on_3b"])
+    state["balls"]       = int(data.get("balls", state["balls"]))
+    state["strikes"]     = int(data.get("strikes", state["strikes"]))
+    state["outs"]        = int(data.get("outs", state["outs"]))
+    state["inning"]      = int(data.get("inning", state["inning"]))
+    state["on_1b"]       = data.get("on_1b", state["on_1b"])
+    state["on_2b"]       = data.get("on_2b", state["on_2b"])
+    state["on_3b"]       = data.get("on_3b", state["on_3b"])
+
+    # Update batter — look up handedness automatically
+    batter = data.get("batter_name", state.get("batter_name", "unknown"))
+    state["batter_name"] = batter
+    info = BATTER_INFO.get(batter, {})
+    state["stand"] = info.get("stand", state.get("stand", "R"))
 
     save_state(state)
 
@@ -164,9 +176,11 @@ def simulate():
 def reset():
     """AJAX: reset to a fresh game state."""
     data = request.get_json() or {}
-    stand = data.get("stand", "R")
+    batter = data.get("batter_name", "unknown")
+    info = BATTER_INFO.get(batter, {})
+    stand = info.get("stand", "R")
 
-    state = new_game_state(batter_stand=stand)
+    state = new_game_state(batter_name=batter, batter_stand=stand)
     save_state(state)
 
     # Clear pitch history in session

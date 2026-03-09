@@ -1,5 +1,5 @@
 """
-Train a Random Forest model to predict pitch outcomes.
+Train an XGBoost model to predict pitch outcomes.
 
 Key design decisions:
   - Trains on ALL pitchers (pooled) for much larger sample size (~50k+ rows).
@@ -14,9 +14,9 @@ import matplotlib.pyplot as plt
 import joblib
 from itertools import product
 from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from sklearn.preprocessing import LabelEncoder
+from xgboost import XGBClassifier
 
 from utils import (
     load_and_prepare_data,
@@ -95,7 +95,17 @@ def main():
     )
 
     # ── 3) Train ──────────────────────────────────────────────────────────
-    rf = RandomForestClassifier(n_estimators=500, random_state=123, n_jobs=-1)
+    rf = XGBClassifier(
+        n_estimators=500,
+        max_depth=6,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=123,
+        n_jobs=-1,
+        use_label_encoder=False,
+        eval_metric="mlogloss",
+    )
 
     cv_scores = cross_val_score(rf, X_train, y_train, cv=5, scoring="accuracy")
     print(f"5-fold CV accuracy: {cv_scores.mean():.4f} (+/- {cv_scores.std():.4f})")
@@ -111,10 +121,24 @@ def main():
     print(classification_report(y_test, preds))
 
     # ── 5) Save ───────────────────────────────────────────────────────────
+    # Build batter list with handedness and team for the UI
+    batter_df = data[["batter_name", "stand"]].copy()
+    if "batter_team" in data.columns:
+        batter_df["team"] = data["batter_team"]
+    else:
+        batter_df["team"] = "UNK"
+    # Take the most common team/stand per batter (handles trades, etc.)
+    batter_info = (
+        batter_df.groupby("batter_name")
+        .agg({"stand": lambda x: x.mode().iloc[0], "team": lambda x: x.mode().iloc[0]})
+        .to_dict(orient="index")
+    )
+
     artifact = {
         "model": rf,
         "label_encoders": label_encoders,
         "eovaldi_pitch_avgs": eovaldi_pitch_avgs,
+        "batter_info": batter_info,
     }
     joblib.dump(artifact, "model_for_pitcher_nathan_eovaldi.pkl")
     print("Saved model_for_pitcher_nathan_eovaldi.pkl")
@@ -124,12 +148,12 @@ def main():
     results = predict_and_score(rf, scenario, label_encoders)
 
     # ── 7) Visualize ──────────────────────────────────────────────────────
-    for outcome in ("out", "strike", "hit"):
+    for outcome in ("out", "called_strike", "whiff", "hit"):
         plot_outcome_by_zone(results, outcome, f"P({outcome}) by Zone & Pitch Type (Eovaldi)")
 
     top10 = results.nlargest(10, "re24_score")
     print("\nTop 10 Pitch+Zone Combos (RE24 — higher = better for pitcher):")
-    print(top10[["combo", "re24_score", "strike", "out", "hit"]].to_string(index=False))
+    print(top10[["combo", "re24_score", "called_strike", "whiff", "foul", "out", "hit"]].to_string(index=False))
     plot_top_combos(top10)
 
 
@@ -158,6 +182,7 @@ def build_eovaldi_scenario(pitch_avgs, label_encoders):
     scenario["on_1b_occupied"]  = "False"
     scenario["on_2b_occupied"]  = "False"
     scenario["on_3b_occupied"]  = "False"
+    scenario["batter_name"]     = "unknown"
     scenario["stand"]           = "R"
     scenario["p_throws"]        = "R"       # Eovaldi is RHP
     scenario["prev_pitch_type"] = "none"
@@ -186,14 +211,15 @@ def predict_and_score(model, scenario_df, label_encoders):
     )
 
     # Ensure all outcome columns exist
-    for col in ("strike", "out", "hit", "ball", "walk_hbp"):
+    for col in ("called_strike", "whiff", "foul", "out", "hit", "ball", "walk_hbp"):
         if col not in results.columns:
             results[col] = 0.0
 
     # RE24 score at default state (0-0, 0 outs, bases empty)
     results["re24_score"] = results.apply(
         lambda r: compute_re24_score(
-            {"strike": r["strike"], "ball": r["ball"], "out": r["out"],
+            {"called_strike": r["called_strike"], "whiff": r["whiff"],
+             "foul": r["foul"], "ball": r["ball"], "out": r["out"],
              "hit": r["hit"], "walk_hbp": r["walk_hbp"]},
             balls=0, strikes=0, outs=0, on_1b=False, on_2b=False, on_3b=False,
         ),
