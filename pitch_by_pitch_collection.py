@@ -60,18 +60,11 @@ while current_date <= season_end:
         if day_data.empty:
             print(f"No games found on {date_str}.")
         else:
-            # Only keep games involving these teams
-            TARGET_TEAMS = {"TEX", "HOU"}
-
             # Process each game individually (grouped by 'game_pk')
             for game_id, game_data in day_data.groupby('game_pk'):
                 # Extract team information (adjust column names if needed)
                 home_team = game_data['home_team'].iloc[0]
                 away_team = game_data['away_team'].iloc[0]
-
-                # Skip games that don't involve a target team
-                if home_team not in TARGET_TEAMS and away_team not in TARGET_TEAMS:
-                    continue
 
                 # Add actual player names
                 if 'batter' in game_data.columns:

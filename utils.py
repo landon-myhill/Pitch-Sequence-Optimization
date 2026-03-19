@@ -3,7 +3,6 @@ Shared utilities for Pitch Sequence Optimization pipeline.
 """
 
 import pandas as pd
-import numpy as np
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Zone Mapping
@@ -27,6 +26,15 @@ ZONE_LABELS = {
     7: "bottom_left",   8: "bottom_middle",   9: "bottom_right",
     11: "up_left",      12: "up_right",
     13: "down_left",    14: "down_right",
+}
+
+# Zone label → vertical tier (for zone-tier hard-hit features)
+ZONE_TIERS = {
+    "top_left": "upper",    "top_middle": "upper",    "top_right": "upper",
+    "up_left":  "upper",    "up_right":   "upper",
+    "middle_left": "middle", "middle_middle": "middle", "middle_right": "middle",
+    "bottom_left": "lower", "bottom_middle": "lower",  "bottom_right": "lower",
+    "down_left":   "lower", "down_right":    "lower",
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -101,16 +109,46 @@ CATEGORICAL_FEATURES = [
     # baserunners
     "on_1b_occupied", "on_2b_occupied", "on_3b_occupied",
     # matchup
-    "batter_name", "stand", "p_throws",
+    "stand", "p_throws",
     # sequencing (previous pitch in this at-bat)
     "prev_pitch_type", "prev_zone_label",
 ]
 
 NUMERIC_FEATURES = [
-    "release_speed",      # velocity (mph)
-    "release_spin_rate",  # spin (rpm)
-    "pfx_x",              # horizontal movement (ft)
-    "pfx_z",              # vertical movement (ft)
+    # pitch physics
+    "release_speed",
+    "release_spin_rate",
+    "pfx_x",
+    "pfx_z",
+    "spin_axis",
+    "release_extension",
+    # plate location
+    "plate_x",
+    "plate_z",
+    # pitch context
+    "pitch_number",
+    # game situation
+    "score_differential",
+    "pitcher_pitches_today",
+    "pitcher_days_rest",
+    # pitcher season stats
+    "pitcher_k_pct",
+    "pitcher_bb_pct",
+    # batter season stats
+    "batter_k_pct",
+    "batter_bb_pct",
+    "batter_whiff_pct",
+    "batter_hard_hit_pct",
+    # batter vs this specific pitch type
+    "batter_whiff_pct_vs_pitch",
+    "batter_k_pct_vs_pitch",
+    "batter_hard_hit_pct_vs_pitch",
+    # batter hard-hit% vs pitch type by zone tier (upper/middle/lower)
+    "batter_hard_hit_pct_vs_pitch_upper",
+    "batter_hard_hit_pct_vs_pitch_middle",
+    "batter_hard_hit_pct_vs_pitch_lower",
+    # park
+    "park_run_factor",
 ]
 
 ALL_FEATURES = CATEGORICAL_FEATURES + NUMERIC_FEATURES
@@ -250,13 +288,181 @@ def compute_re24_score(prob_dict, balls, strikes, outs, on_1b, on_2b, on_3b):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Batter Stats
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def compute_batter_stats(data):
+    """
+    Compute per-batter aggregate stats from pitch data.
+
+    Returns a DataFrame indexed by batter_name with columns:
+        batter_k_pct, batter_bb_pct, batter_whiff_pct, batter_hard_hit_pct
+    """
+    df = data.copy()
+
+    # ── Plate appearance flag: only rows where events is non-null and non-empty ──
+    df["_is_pa"] = df["events"].notna() & (df["events"].astype(str).str.strip() != "")
+
+    # Terminal outcomes by batter
+    df["_is_k"]    = df["events"].isin({"strikeout", "strikeout_double_play"})
+    df["_is_bb"]   = df["events"].isin(WALK_HBP_EVENTS)
+    df["_is_hit"]  = df["events"].isin(HIT_EVENTS)
+
+    # Whiff / foul / called strike per pitch
+    desc = df["description"].astype(str).str.lower().str.strip()
+    df["_is_whiff"]        = desc.isin(WHIFF_DESCRIPTIONS)
+    df["_is_foul"]         = desc.isin(FOUL_DESCRIPTIONS)
+    df["_is_called_strike"] = (df["type"] == "S") & ~df["_is_whiff"] & ~df["_is_foul"]
+
+    grouped = df.groupby("batter_name")
+
+    pa         = grouped["_is_pa"].sum()
+    k          = grouped["_is_k"].sum()
+    bb         = grouped["_is_bb"].sum()
+    hits       = grouped["_is_hit"].sum()
+    whiffs     = grouped["_is_whiff"].sum()
+    fouls      = grouped["_is_foul"].sum()
+    c_strikes  = grouped["_is_called_strike"].sum()
+
+    batter_stats = pd.DataFrame(index=pa.index)
+    batter_stats["batter_k_pct"]        = (k / pa.clip(lower=1)).fillna(0.0)
+    batter_stats["batter_bb_pct"]       = (bb / pa.clip(lower=1)).fillna(0.0)
+    batter_stats["batter_hard_hit_pct"] = (hits / pa.clip(lower=1)).fillna(0.0)
+
+    swing_opportunities = whiffs + fouls + c_strikes
+    batter_stats["batter_whiff_pct"] = (
+        whiffs / swing_opportunities.clip(lower=1)
+    ).fillna(0.0)
+
+    return batter_stats
+
+
+def compute_batter_pitch_type_splits(data):
+    """
+    Compute per-batter, per-pitch-type stats.
+    Returns DataFrame with: batter_name, pitch_type,
+    batter_whiff_pct_vs_pitch, batter_k_pct_vs_pitch, batter_hard_hit_pct_vs_pitch
+    """
+    df = data.copy()
+    desc = df["description"].astype(str).str.lower().str.strip()
+    df["_is_whiff"] = desc.isin(WHIFF_DESCRIPTIONS)
+    df["_is_foul"] = desc.isin(FOUL_DESCRIPTIONS)
+    df["_is_called_strike"] = (df["type"] == "S") & ~df["_is_whiff"] & ~df["_is_foul"]
+    df["_is_k"] = df["events"].isin({"strikeout", "strikeout_double_play"})
+    df["_is_pa"] = df["events"].notna() & (df["events"].astype(str).str.strip() != "")
+    df["_is_hit"] = df["events"].isin(HIT_EVENTS)
+
+    g = df.groupby(["batter_name", "pitch_type"])
+    agg = g.agg(
+        pa=("_is_pa", "sum"),
+        k=("_is_k", "sum"),
+        hits=("_is_hit", "sum"),
+        whiffs=("_is_whiff", "sum"),
+        fouls=("_is_foul", "sum"),
+        c_strikes=("_is_called_strike", "sum"),
+    ).reset_index()
+
+    swing_opp = agg["whiffs"] + agg["fouls"] + agg["c_strikes"]
+    agg["batter_whiff_pct_vs_pitch"] = (agg["whiffs"] / swing_opp.clip(lower=1)).fillna(0.0)
+    agg["batter_k_pct_vs_pitch"] = (agg["k"] / agg["pa"].clip(lower=1)).fillna(0.0)
+    agg["batter_hard_hit_pct_vs_pitch"] = (agg["hits"] / agg["pa"].clip(lower=1)).fillna(0.0)
+
+    return agg[["batter_name", "pitch_type",
+                "batter_whiff_pct_vs_pitch", "batter_k_pct_vs_pitch",
+                "batter_hard_hit_pct_vs_pitch"]]
+
+
+def compute_batter_pitch_zone_tier_splits(data):
+    """
+    Compute per-batter, per-pitch-type hard-hit% split by zone tier (upper/middle/lower).
+
+    Returns DataFrame with: batter_name, pitch_type,
+    batter_hard_hit_pct_vs_pitch_upper, batter_hard_hit_pct_vs_pitch_middle,
+    batter_hard_hit_pct_vs_pitch_lower
+    """
+    df = data.copy()
+    df["_zone_tier"] = df["zone_label"].map(ZONE_TIERS).fillna("middle")
+    df["_is_hit"] = df["events"].isin(HIT_EVENTS)
+    df["_is_pa"] = df["events"].notna() & (df["events"].astype(str).str.strip() != "")
+
+    g = df.groupby(["batter_name", "pitch_type", "_zone_tier"])
+    agg = g.agg(pa=("_is_pa", "sum"), hits=("_is_hit", "sum")).reset_index()
+    agg["hard_hit_pct"] = (agg["hits"] / agg["pa"].clip(lower=1)).fillna(0.0)
+
+    pivoted = agg.pivot_table(
+        index=["batter_name", "pitch_type"],
+        columns="_zone_tier",
+        values="hard_hit_pct",
+        fill_value=0.0,
+    ).reset_index()
+
+    for tier in ("upper", "middle", "lower"):
+        if tier not in pivoted.columns:
+            pivoted[tier] = 0.0
+
+    pivoted = pivoted.rename(columns={
+        "upper":  "batter_hard_hit_pct_vs_pitch_upper",
+        "middle": "batter_hard_hit_pct_vs_pitch_middle",
+        "lower":  "batter_hard_hit_pct_vs_pitch_lower",
+    })
+
+    cols = ["batter_name", "pitch_type",
+            "batter_hard_hit_pct_vs_pitch_upper",
+            "batter_hard_hit_pct_vs_pitch_middle",
+            "batter_hard_hit_pct_vs_pitch_lower"]
+    return pivoted[cols]
+
+
+def compute_pitcher_stats(data):
+    """
+    Compute per-pitcher season K% and BB%.
+    Returns DataFrame indexed by pitcher_name with pitcher_k_pct, pitcher_bb_pct.
+    """
+    df = data.copy()
+    df["_is_pa"] = df["events"].notna() & (df["events"].astype(str).str.strip() != "")
+    df["_is_k"] = df["events"].isin({"strikeout", "strikeout_double_play"})
+    df["_is_bb"] = df["events"].isin(WALK_HBP_EVENTS)
+
+    g = df.groupby("pitcher_name")
+    agg = g.agg(pa=("_is_pa", "sum"), k=("_is_k", "sum"), bb=("_is_bb", "sum"))
+    agg["pitcher_k_pct"] = (agg["k"] / agg["pa"].clip(lower=1)).fillna(0.0)
+    agg["pitcher_bb_pct"] = (agg["bb"] / agg["pa"].clip(lower=1)).fillna(0.0)
+    return agg[["pitcher_k_pct", "pitcher_bb_pct"]]
+
+
+def compute_park_factors(data):
+    """
+    Compute park run factors normalized to league average = 1.0.
+    Returns {home_team: factor}
+    """
+    if "home_team" not in data.columns:
+        return {}
+
+    tmp = data[["game_pk", "home_team"]].copy()
+    tmp["bat_score"] = pd.to_numeric(data.get("bat_score", 0), errors="coerce").fillna(0)
+    tmp["fld_score"] = pd.to_numeric(data.get("fld_score", 0), errors="coerce").fillna(0)
+
+    game_totals = (
+        tmp.groupby(["game_pk", "home_team"])
+        .agg(max_bat=("bat_score", "max"), max_fld=("fld_score", "max"))
+        .reset_index()
+    )
+    game_totals["total_runs"] = game_totals["max_bat"] + game_totals["max_fld"]
+    park_avg = game_totals.groupby("home_team")["total_runs"].mean()
+    league_avg = park_avg.mean()
+    if league_avg == 0:
+        return {}
+    return (park_avg / league_avg).to_dict()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Data Loading
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def load_and_prepare_data(csv_path, pitcher_name=None, min_rows=500):
     """
     Load combined pitch CSV, apply zone labels, classify outcomes,
-    and optionally filter to a specific pitcher.
+    compute batter aggregate stats, and optionally filter to a specific pitcher.
 
     Args:
         csv_path:     path to the combined CSV.
@@ -281,8 +487,17 @@ def load_and_prepare_data(csv_path, pitcher_name=None, min_rows=500):
         if col in data.columns:
             data[col] = data[col].fillna("none")
 
-    # Fill missing numeric features with column median
-    for col in NUMERIC_FEATURES:
+    # Fill missing pitch-physics numeric features with column median
+    # (batter stat columns are added below via merge, so they won't be in
+    #  the raw CSV and the loop below will skip them correctly)
+    physics_cols = [
+        "release_speed", "release_spin_rate", "pfx_x", "pfx_z",
+        "spin_axis", "release_extension",
+        "plate_x", "plate_z",
+        "pitch_number", "score_differential",
+        "pitcher_pitches_today", "pitcher_days_rest",
+    ]
+    for col in physics_cols:
         if col in data.columns:
             data[col] = pd.to_numeric(data[col], errors="coerce")
             data[col] = data[col].fillna(data[col].median())
@@ -291,6 +506,24 @@ def load_and_prepare_data(csv_path, pitcher_name=None, min_rows=500):
     for col in ("stand", "p_throws"):
         if col in data.columns:
             data[col] = data[col].fillna("R")
+
+    # ── Batter aggregate stats ─────────────────────────────────────────────
+    batter_stats = compute_batter_stats(data)
+
+    # League-average fallback for batters not in training data
+    league_avg = batter_stats.mean()
+
+    # Merge stats into pitch rows
+    data = data.merge(
+        batter_stats.reset_index(),
+        on="batter_name",
+        how="left",
+    )
+    for stat_col in ["batter_k_pct", "batter_bb_pct", "batter_whiff_pct", "batter_hard_hit_pct"]:
+        if stat_col in data.columns:
+            data[stat_col] = data[stat_col].fillna(league_avg[stat_col])
+        else:
+            data[stat_col] = league_avg[stat_col]
 
     # Optionally filter to one pitcher
     if pitcher_name is not None:
