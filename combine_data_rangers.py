@@ -94,6 +94,47 @@ def main():
     # ── Pitch sequencing: lag features within each at-bat ─────────────────
     _add_lag_features(pitch_data)
 
+    # ── Score differential ────────────────────────────────────────────────
+    if "bat_score" in pitch_data.columns and "fld_score" in pitch_data.columns:
+        pitch_data["bat_score"] = pd.to_numeric(pitch_data["bat_score"], errors="coerce").fillna(0)
+        pitch_data["fld_score"] = pd.to_numeric(pitch_data["fld_score"], errors="coerce").fillna(0)
+        pitch_data["score_differential"] = pitch_data["bat_score"] - pitch_data["fld_score"]
+    else:
+        pitch_data["score_differential"] = 0.0
+
+    # ── Pitcher fatigue ───────────────────────────────────────────────────
+    sort_cols = [c for c in ("game_pk", "at_bat_number", "pitch_number") if c in pitch_data.columns]
+    if sort_cols:
+        pitch_data = pitch_data.sort_values(sort_cols)
+    if "game_pk" in pitch_data.columns and "pitcher" in pitch_data.columns:
+        pitch_data["pitcher_pitches_today"] = (
+            pitch_data.groupby(["game_pk", "pitcher"]).cumcount() + 1
+        ).astype(float)
+    else:
+        pitch_data["pitcher_pitches_today"] = 1.0
+
+    # ── Pitcher days rest ─────────────────────────────────────────────────
+    if "game_date" in pitch_data.columns and "pitcher" in pitch_data.columns:
+        pitch_data["_game_date_dt"] = pd.to_datetime(pitch_data["game_date"], errors="coerce")
+        pitcher_dates = (
+            pitch_data[["pitcher", "_game_date_dt"]]
+            .drop_duplicates()
+            .sort_values(["pitcher", "_game_date_dt"])
+        )
+        pitcher_dates["pitcher_days_rest"] = (
+            pitcher_dates.groupby("pitcher")["_game_date_dt"]
+            .diff().dt.days.fillna(5).clip(upper=30)
+        )
+        pitch_data = pitch_data.merge(
+            pitcher_dates[["pitcher", "_game_date_dt", "pitcher_days_rest"]],
+            on=["pitcher", "_game_date_dt"],
+            how="left",
+        )
+        pitch_data["pitcher_days_rest"] = pitch_data["pitcher_days_rest"].fillna(5.0)
+        pitch_data.drop(columns=["_game_date_dt"], inplace=True, errors="ignore")
+    else:
+        pitch_data["pitcher_days_rest"] = 5.0
+
     # ── Save ──────────────────────────────────────────────────────────────
     print(f"Final shape: {pitch_data.shape}")
     pitch_data.to_csv("combined_pitch_data.csv", index=False)

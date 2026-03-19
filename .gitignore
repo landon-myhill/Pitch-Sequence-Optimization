@@ -1,0 +1,14 @@
+# Large data files
+games_by_team/
+combined_pitch_data.csv
+
+# Trained models
+*.pkl
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
