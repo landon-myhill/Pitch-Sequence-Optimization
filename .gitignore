@@ -2,13 +2,18 @@
 games_by_team/
 combined_pitch_data.csv
 
-# Trained models
-*.pkl
+# Trained model is tracked via Git LFS (not ignored)
 
-# Python cache
+# Python
 __pycache__/
 *.pyc
 *.pyo
+venv/
+.claude
+
+# Generated images (but keep screenshots/)
+*.png
+!screenshots/*.png
 
 # OS
 .DS_Store

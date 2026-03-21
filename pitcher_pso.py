@@ -25,7 +25,7 @@ from utils import (
     compute_pitcher_stats,
     compute_park_factors,
     CATEGORICAL_FEATURES, NUMERIC_FEATURES, ALL_FEATURES,
-    compute_re24_score,
+    compute_re24_score, apply_location_penalties,
 )
 
 # Physics features stored per pitcher/pitch-type (excludes batter stats and plate location)
@@ -229,7 +229,7 @@ def main():
     )
 
     # ── 8) Train ──────────────────────────────────────────────────────────
-    rf = XGBClassifier(
+    xgb_model = XGBClassifier(
         n_estimators=800,
         max_depth=8,
         learning_rate=0.05,
@@ -245,16 +245,16 @@ def main():
     from sklearn.utils.class_weight import compute_sample_weight
     sample_weights = compute_sample_weight("balanced", y_train)
 
-    cv_scores = cross_val_score(rf, X_train, y_train, cv=5, scoring="accuracy")
+    cv_scores = cross_val_score(xgb_model, X_train, y_train, cv=5, scoring="accuracy")
     print(f"5-fold CV accuracy: {cv_scores.mean():.4f} (+/- {cv_scores.std():.4f})")
 
-    rf.fit(X_train, y_train, sample_weight=sample_weights)
+    xgb_model.fit(X_train, y_train, sample_weight=sample_weights)
 
     # ── 9) Evaluate ───────────────────────────────────────────────────────
-    preds = rf.predict(X_test)
+    preds = xgb_model.predict(X_test)
     print(f"\nAccuracy: {accuracy_score(y_test, preds):.3f}")
     print("\nConfusion Matrix:")
-    print(confusion_matrix(y_test, preds, labels=rf.classes_))
+    print(confusion_matrix(y_test, preds, labels=xgb_model.classes_))
     print("\nClassification Report:")
     print(classification_report(y_test, preds, target_names=le_outcome.classes_))
 
@@ -273,7 +273,7 @@ def main():
     )
 
     artifact = {
-        "model":                        rf,
+        "model":                        xgb_model,
         "label_encoders":               label_encoders,
         "le_outcome":                   le_outcome,
         "pitcher_pitch_avgs":           pitcher_pitch_avgs,
@@ -287,8 +287,6 @@ def main():
         "pitcher_stats":                pitcher_stats_dict,
         "league_avg_pitcher_stats":     league_avg_pitcher_stats,
         "park_factors":                 park_factors,
-        # backwards-compat fallback
-        "eovaldi_pitch_avgs":           eovaldi_pitch_avgs,
     }
     joblib.dump(artifact, "pitch_sequence_model.pkl")
     print("Saved pitch_sequence_model.pkl")
@@ -310,7 +308,7 @@ def main():
         pitcher_k_pct=eovaldi_k_pct,
         pitcher_bb_pct=eovaldi_bb_pct,
     )
-    results = predict_and_score(rf, scenario, label_encoders, le_outcome=le_outcome)
+    results = predict_and_score(xgb_model, scenario, label_encoders, le_outcome=le_outcome)
 
     # ── 12) Visualize ─────────────────────────────────────────────────────
     for outcome in ("out", "called_strike", "whiff", "hit"):
@@ -399,17 +397,9 @@ def build_pitcher_scenario(pitch_avgs, label_encoders, p_throws="R",
     scenario["batter_whiff_pct_vs_pitch"] = batter_stats.get("batter_whiff_pct_vs_pitch", 0.0)
     scenario["batter_k_pct_vs_pitch"]     = batter_stats.get("batter_k_pct_vs_pitch", 0.0)
     scenario["batter_hard_hit_pct_vs_pitch"] = batter_stats.get("batter_hard_hit_pct_vs_pitch", 0.0)
-    scenario["batter_hard_hit_pct_vs_pitch_upper"]  = 0.0
-    scenario["batter_hard_hit_pct_vs_pitch_middle"] = 0.0
-    scenario["batter_hard_hit_pct_vs_pitch_lower"]  = 0.0
     scenario["park_run_factor"]           = 1.0
 
     return scenario
-
-
-# Keep old name as alias for backwards compatibility with visualisation calls
-def build_eovaldi_scenario(pitch_avgs, label_encoders):
-    return build_pitcher_scenario(pitch_avgs, label_encoders, p_throws="R")
 
 
 def predict_and_score(model, scenario_df, label_encoders, le_outcome=None):
@@ -442,6 +432,9 @@ def predict_and_score(model, scenario_df, label_encoders, le_outcome=None):
         axis=1,
     )
     results["combo"] = results["pitch_type"] + "_" + results["zone_label"]
+
+    # Penalize poor pitch-zone combos (breaking balls up, anything middle-middle)
+    apply_location_penalties(results)
 
     return results
 

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import joblib
 from itertools import product
 
-from utils import compute_re24_score
+from utils import compute_re24_score, apply_location_penalties
 from pitcher_pso import encode_categoricals, build_feature_matrix, PHYSICS_FEATURES
 
 
@@ -281,16 +281,6 @@ def recommend_next_pitch(
         )
     )
 
-    # Batter hard-hit% per zone tier (all three filled per row; model uses relevant one)
-    for tier_col in ("batter_hard_hit_pct_vs_pitch_upper",
-                     "batter_hard_hit_pct_vs_pitch_middle",
-                     "batter_hard_hit_pct_vs_pitch_lower"):
-        scenario[tier_col] = scenario["pitch_type"].apply(
-            lambda pt: batter_pt.get(pt, {}).get(
-                tier_col, league_vs_pitch.get(tier_col, 0.0)
-            )
-        )
-
     # Park factor
     home_team = state.get("home_team", "")
     scenario["park_run_factor"] = park_factors.get(home_team, 1.0)
@@ -319,6 +309,9 @@ def recommend_next_pitch(
         axis=1,
     )
     scenario["combo"] = scenario["pitch_type"] + "_" + scenario["zone_label"]
+
+    # Penalize poor pitch-zone combos (breaking balls up, anything middle-middle)
+    apply_location_penalties(scenario)
 
     return scenario.nlargest(top_n, "re24_score")
 

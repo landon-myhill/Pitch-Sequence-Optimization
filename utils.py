@@ -38,6 +38,40 @@ ZONE_TIERS = {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Location Penalties
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Breaking balls / offspeed up in the zone are easier to hit — penalize them.
+_OFFSPEED_TYPES = {"CH", "CU", "KC", "CS", "SL", "ST", "SV"}
+_UPPER_ZONES = {z for z, tier in ZONE_TIERS.items() if tier == "upper"}
+
+# Penalty applied as a multiplier on RE24 score (lower = worse for pitcher).
+OFFSPEED_UP_PENALTY = 0.15      # 85% reduction for breaking balls up
+MIDDLE_MIDDLE_PENALTY = 0.10    # 90% reduction for anything middle-middle
+
+
+def apply_location_penalties(df):
+    """
+    Adjust RE24 scores for poor pitch-zone combinations:
+      - Breaking balls / offspeed in upper zones (hanging pitches)
+      - Any pitch middle-middle (heart of the plate)
+
+    Operates in-place on a DataFrame that has 'pitch_type', 'zone_label',
+    and 're24_score' columns.
+    """
+    is_offspeed_up = (
+        df["pitch_type"].isin(_OFFSPEED_TYPES)
+        & df["zone_label"].isin(_UPPER_ZONES)
+    )
+    is_middle_middle = df["zone_label"] == "middle_middle"
+
+    df.loc[is_offspeed_up, "re24_score"] *= OFFSPEED_UP_PENALTY
+    df.loc[is_middle_middle, "re24_score"] *= MIDDLE_MIDDLE_PENALTY
+
+    return df
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Outcome Classification
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -143,10 +177,6 @@ NUMERIC_FEATURES = [
     "batter_whiff_pct_vs_pitch",
     "batter_k_pct_vs_pitch",
     "batter_hard_hit_pct_vs_pitch",
-    # batter hard-hit% vs pitch type by zone tier (upper/middle/lower)
-    "batter_hard_hit_pct_vs_pitch_upper",
-    "batter_hard_hit_pct_vs_pitch_middle",
-    "batter_hard_hit_pct_vs_pitch_lower",
     # park
     "park_run_factor",
 ]
