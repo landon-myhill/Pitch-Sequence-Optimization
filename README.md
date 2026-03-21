@@ -92,7 +92,9 @@ static/style.css              # Styling
 
 ## Screenshots
 
-<!-- Add screenshots of the web app here -->
+![Pitch recommendations for Eovaldi vs Yordan Alvarez](screenshots/Situation:Outcome.png)
+
+See the full **[Walkthrough](WALKTHROUGH.md)** for a step-by-step demo simulating a 3-pitch strikeout of Yordan Alvarez.
 
 ---
 
