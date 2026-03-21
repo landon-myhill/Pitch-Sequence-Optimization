@@ -6,6 +6,7 @@ Open: http://localhost:5000
 """
 
 import io
+import os
 import base64
 from flask import Flask, render_template, request, jsonify, session
 
@@ -22,14 +23,22 @@ from dynamic_pitcher import (
 # ═══════════════════════════════════════════════════════════════════════════════
 
 app = Flask(__name__)
-app.secret_key = "pso-dev-key"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "pso-dev-key")
+
+MODEL_PATH = "pitch_sequence_model.pkl"
+if not os.path.exists(MODEL_PATH):
+    raise SystemExit(
+        f"\n  Model file '{MODEL_PATH}' not found.\n"
+        "  If you cloned with Git LFS, run:  git lfs pull\n"
+        "  To train from scratch, see the README.\n"
+    )
 
 # Load model once at startup
 (MODEL, ENCODERS, PITCHER_PITCH_AVGS, BATTER_INFO, LE_OUTCOME,
  ZONE_LOCATION_AVGS, PITCHER_INFO, BATTER_STATS,
  LEAGUE_AVG_BATTER_STATS, BATTER_VS_PITCH_TYPE_SPLITS,
  LEAGUE_AVG_BATTER_VS_PITCH, PITCHER_STATS, LEAGUE_AVG_PITCHER_STATS,
- PARK_FACTORS) = load_model()
+ PARK_FACTORS) = load_model(MODEL_PATH)
 
 ZONES = ENCODERS["zone_label"].classes_.tolist()
 

@@ -1,7 +1,7 @@
 """
-Combine and clean Statcast pitch data for the Texas Rangers.
+Combine and clean Statcast pitch data for all MLB teams.
 
-Pipeline step 2: reads raw CSVs from games_by_team/, filters to Rangers,
+Pipeline step 2: reads raw CSVs from games_by_team/, deduplicates,
 cleans columns, engineers lag features, and saves a single CSV.
 """
 
