@@ -90,11 +90,13 @@ static/style.css              # Styling
 
 ---
 
-## Screenshots
+## Demo
 
-![Pitch recommendations for Eovaldi vs Yordan Alvarez](screenshots/Situation:Outcome.png)
+https://github.com/user-attachments/assets/demo.mp4
 
-See the full **[Walkthrough](WALKTHROUGH.md)** for a step-by-step demo simulating a 3-pitch strikeout of Yordan Alvarez.
+<video src="demo.mp4" controls width="100%"></video>
+
+Watch a full at-bat simulation: Eovaldi vs Jose Altuve — 4-pitch strikeout with real-time recommendation updates after each pitch.
 
 ---
 
