@@ -17,7 +17,7 @@ Built with the full **2024 MLB Statcast** season (~700K pitches across all 30 te
 
 ## Demo
 
-<video src="demo.mp4" controls width="100%"></video>
+https://github.com/landon-myhill/Pitch-Sequence-Optimization/raw/main/demo.mp4
 
 Eovaldi vs Jose Altuve — 4-pitch strikeout with real-time recommendation updates after each pitch.
 
