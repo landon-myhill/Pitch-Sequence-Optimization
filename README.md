@@ -15,41 +15,13 @@ Built with the full **2024 MLB Statcast** season (~700K pitches across all 30 te
 
 ---
 
-## Architecture
+## Demo
 
-```
-                    Statcast API
-                        |
-            +-----------+-----------+
-            |                       |
-   pitch_by_pitch_collection.py     |
-   (scrape 2024 season day-by-day)  |
-            |                       |
-      games_by_team/                |
-      (raw CSVs by team)            |
-            |                       |
-      combine_data.py               |
-      (dedupe, clean, engineer      |
-       lag/fatigue/rest features)   |
-            |                       |
-   combined_pitch_data.csv          |
-            |                       |
-      pitcher_pso.py                |
-      (train XGBoost classifier,    |
-       compute stats, save model)   |
-            |                       |
-   pitch_sequence_model.pkl         |
-            |                       |
-      dynamic_pitcher.py            |
-      (game state engine +          |
-       recommendation logic)        |
-            |                       |
-          app.py  <-----------------+
-          (Flask web server)
-            |
-      templates/index.html
-      static/style.css
-```
+https://github.com/user-attachments/assets/demo.mp4
+
+<video src="demo.mp4" controls width="100%"></video>
+
+Watch a full at-bat simulation: Eovaldi vs Jose Altuve — 4-pitch strikeout with real-time recommendation updates after each pitch.
 
 ---
 
@@ -71,32 +43,6 @@ Built with the full **2024 MLB Statcast** season (~700K pitches across all 30 te
 | Outcome classes | `called_strike`, `whiff`, `foul`, `ball`, `out`, `hit`, `walk_hbp` |
 | Class balancing | Sample weights via `compute_sample_weight("balanced")` |
 | Train/test split | 70/30 stratified |
-
----
-
-## Project Structure
-
-```
-pitcher_pso.py                # Train XGBoost model, save artifact
-dynamic_pitcher.py            # Game state engine + recommendation logic
-utils.py                      # RE24 tables, feature definitions, stat computations
-app.py                        # Flask web server
-combine_data.py               # Clean, deduplicate, engineer features
-pitch_by_pitch_collection.py  # Scrape Statcast data for 2024 season
-heatmap_pitcher.py            # EDA visualizations (pitch location heatmaps)
-templates/index.html          # Interactive web UI
-static/style.css              # Styling
-```
-
----
-
-## Demo
-
-https://github.com/user-attachments/assets/demo.mp4
-
-<video src="demo.mp4" controls width="100%"></video>
-
-Watch a full at-bat simulation: Eovaldi vs Jose Altuve — 4-pitch strikeout with real-time recommendation updates after each pitch.
 
 ---
 
@@ -145,6 +91,58 @@ python pitcher_pso.py
 - **Python** — pandas, NumPy, scikit-learn, XGBoost, matplotlib, Flask
 - **Data** — MLB Statcast via [pybaseball](https://github.com/jldbc/pybaseball)
 - **Scoring** — RE24 run expectancy tables calibrated to 2024 MLB season averages
+
+---
+
+## Architecture
+
+```
+                    Statcast API
+                        |
+            +-----------+-----------+
+            |                       |
+   pitch_by_pitch_collection.py     |
+   (scrape 2024 season day-by-day)  |
+            |                       |
+      games_by_team/                |
+      (raw CSVs by team)            |
+            |                       |
+      combine_data.py               |
+      (dedupe, clean, engineer      |
+       lag/fatigue/rest features)   |
+            |                       |
+   combined_pitch_data.csv          |
+            |                       |
+      pitcher_pso.py                |
+      (train XGBoost classifier,    |
+       compute stats, save model)   |
+            |                       |
+   pitch_sequence_model.pkl         |
+            |                       |
+      dynamic_pitcher.py            |
+      (game state engine +          |
+       recommendation logic)        |
+            |                       |
+          app.py  <-----------------+
+          (Flask web server)
+            |
+      templates/index.html
+      static/style.css
+```
+
+## Project Structure
+
+```
+pitcher_pso.py                # Train XGBoost model, save artifact
+dynamic_pitcher.py            # Game state engine + recommendation logic
+utils.py                      # RE24 tables, feature definitions, stat computations
+app.py                        # Flask web server
+combine_data.py               # Clean, deduplicate, engineer features
+pitch_by_pitch_collection.py  # Scrape Statcast data for 2024 season
+heatmap_pitcher.py            # EDA visualizations (pitch location heatmaps)
+templates/index.html          # Interactive web UI
+static/style.css              # Styling
+```
 
 ---
 
