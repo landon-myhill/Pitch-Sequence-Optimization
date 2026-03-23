@@ -1,19 +1,14 @@
 # Large data files
 games_by_team/
 combined_pitch_data.csv
-
 # Trained model is tracked via Git LFS (not ignored)
-
 # Python
 __pycache__/
 *.pyc
 *.pyo
 venv/
 .claude
-
-# Generated images (but keep screenshots/)
+# Generated images
 *.png
-!screenshots/*.png
-
 # OS
 .DS_Store
