@@ -17,11 +17,9 @@ Built with the full **2024 MLB Statcast** season (~700K pitches across all 30 te
 
 ## Demo
 
-https://github.com/user-attachments/assets/demo.mp4
-
 <video src="demo.mp4" controls width="100%"></video>
 
-Watch a full at-bat simulation: Eovaldi vs Jose Altuve — 4-pitch strikeout with real-time recommendation updates after each pitch.
+Eovaldi vs Jose Altuve — 4-pitch strikeout with real-time recommendation updates after each pitch.
 
 ---
 
